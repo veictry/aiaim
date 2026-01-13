@@ -114,6 +114,12 @@ def main():
     is_flag=True,
     help="Quiet mode - minimal output",
 )
+@click.option(
+    "--chat-id",
+    "-c",
+    default=None,
+    help="Resume an existing chat session (skip creating new chat)",
+)
 def run(
     task: str,
     agent_type: str,
@@ -122,6 +128,7 @@ def run(
     delay: float,
     output: Optional[str],
     quiet: bool,
+    chat_id: Optional[str],
 ):
     """Run a task with the supervisor/worker loop.
 
@@ -143,6 +150,8 @@ def run(
     console.print(f"  模型: {model}")
     console.print(f"  最大迭代次数: {max_iterations}")
     console.print(f"  迭代间隔: {delay}秒")
+    if chat_id:
+        console.print(f"  恢复会话: {chat_id}")
 
     # Create runner
     runner = TaskRunner(
@@ -150,6 +159,7 @@ def run(
         model=model,
         max_iterations=max_iterations,
         delay_between_iterations=delay,
+        chat_id=chat_id,
         on_status_update=None if quiet else create_status_callback(),
         on_iteration_complete=None if quiet else create_iteration_callback(),
         on_agent_output=None if quiet else create_agent_output_callback(),
@@ -206,7 +216,13 @@ def run(
     default="claude-4.5-opus-high-thinking",
     help="Model name to use",
 )
-def check(task: str, agent_type: str, model: str):
+@click.option(
+    "--chat-id",
+    "-c",
+    default=None,
+    help="Resume an existing chat session (skip creating new chat)",
+)
+def check(task: str, agent_type: str, model: str, chat_id: Optional[str]):
     """Check if a task is complete without executing.
 
     TASK is the task description to check.
@@ -225,6 +241,7 @@ def check(task: str, agent_type: str, model: str):
     runner = TaskRunner(
         agent_type=AgentType(agent_type),
         model=model,
+        chat_id=chat_id,
         on_agent_output=create_agent_output_callback(),
     )
 
@@ -277,7 +294,13 @@ def check(task: str, agent_type: str, model: str):
     multiple=True,
     help="Pending items to work on (can be specified multiple times)",
 )
-def step(task: str, agent_type: str, model: str, pending: tuple):
+@click.option(
+    "--chat-id",
+    "-c",
+    default=None,
+    help="Resume an existing chat session (skip creating new chat)",
+)
+def step(task: str, agent_type: str, model: str, pending: tuple, chat_id: Optional[str]):
     """Run a single iteration of worker + supervisor.
 
     TASK is the task description to execute.
@@ -303,6 +326,7 @@ def step(task: str, agent_type: str, model: str, pending: tuple):
     runner = TaskRunner(
         agent_type=AgentType(agent_type),
         model=model,
+        chat_id=chat_id,
         on_agent_output=create_agent_output_callback(),
     )
 

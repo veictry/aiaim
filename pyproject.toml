@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aiaim"
-version = "0.1.0"
+version = "0.1.1"
 description = "AI Agent Iterative Manager - Supervisor/Worker agent pattern for task completion"
 readme = "README.md"
 license = {text = "MIT"}

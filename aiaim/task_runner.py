@@ -33,7 +33,9 @@ class IterationLog:
             "iteration": self.iteration,
             "timestamp": self.timestamp,
             "worker_result": self.worker_result.to_dict() if self.worker_result else None,
-            "supervisor_result": self.supervisor_result.to_dict() if self.supervisor_result else None,
+            "supervisor_result": (
+                self.supervisor_result.to_dict() if self.supervisor_result else None
+            ),
         }
 
 
@@ -79,6 +81,7 @@ class TaskRunner:
         model: str = "claude-4.5-opus-high-thinking",
         max_iterations: int = 10,
         delay_between_iterations: float = 1.0,
+        chat_id: Optional[str] = None,
         supervisor_agent: Optional[SupervisorAgent] = None,
         worker_agent: Optional[WorkerAgent] = None,
         on_iteration_complete: Optional[Callable[[IterationLog], None]] = None,
@@ -93,6 +96,8 @@ class TaskRunner:
             model: The model name to use.
             max_iterations: Maximum number of worker iterations before stopping.
             delay_between_iterations: Delay in seconds between iterations.
+            chat_id: Optional chat ID to resume an existing conversation.
+                     If provided, skip creating a new chat session.
             supervisor_agent: Optional pre-configured supervisor agent.
             worker_agent: Optional pre-configured worker agent.
             on_iteration_complete: Optional callback after each iteration.
@@ -103,6 +108,7 @@ class TaskRunner:
         self.model = model
         self.max_iterations = max_iterations
         self.delay_between_iterations = delay_between_iterations
+        self.chat_id = chat_id
 
         # Store provided agents (may be None)
         self._provided_supervisor = supervisor_agent
@@ -116,8 +122,8 @@ class TaskRunner:
         self.on_status_update = on_status_update
         self.on_agent_output = on_agent_output
 
-        # Shared agent CLI instance (with chat_id)
-        self._shared_agent_cli: Optional[AgentCLI] = None
+        # Worker agent CLI instance (with chat_id)
+        self._worker_agent_cli: Optional[AgentCLI] = None
 
     def _log_status(self, message: str) -> None:
         """Log a status update."""
@@ -126,36 +132,53 @@ class TaskRunner:
 
     def _initialize_agents(self) -> str:
         """
-        Initialize shared agent CLI and create chat session.
+        Initialize agent CLIs for worker and supervisor.
+
+        Worker uses chat_id if provided (--resume mode), supervisor is independent.
 
         Returns:
-            The chat_id for the session.
+            The chat_id for the worker session.
         """
-        # Create shared agent CLI
-        self._shared_agent_cli = AgentCLI.create(
+        # Create worker agent CLI with chat_id if provided
+        worker_agent_cli = AgentCLI.create(
+            agent_type=self.agent_type,
+            model=self.model,
+            chat_id=self.chat_id,
+        )
+
+        # If chat_id was provided, use it directly; otherwise create new chat for worker
+        if self.chat_id:
+            chat_id = self.chat_id
+        else:
+            # Create chat session and get chat_id
+            chat_id = worker_agent_cli.create_chat()
+
+        # Supervisor uses independent agent CLI (no chat_id, no shared session)
+        supervisor_agent_cli = AgentCLI.create(
             agent_type=self.agent_type,
             model=self.model,
         )
 
-        # Create chat session and get chat_id
-        chat_id = self._shared_agent_cli.create_chat()
-
-        # Create supervisor and worker with shared agent CLI
+        # Create supervisor with independent agent CLI
         self.supervisor = self._provided_supervisor or SupervisorAgent(
-            agent_cli=self._shared_agent_cli,
+            agent_cli=supervisor_agent_cli,
             on_output=self.on_agent_output,
         )
         # If provided supervisor, update its agent_cli
         if self._provided_supervisor:
-            self._provided_supervisor.agent_cli = self._shared_agent_cli
+            self._provided_supervisor.agent_cli = supervisor_agent_cli
 
+        # Create worker with chat_id-enabled agent CLI
         self.worker = self._provided_worker or WorkerAgent(
-            agent_cli=self._shared_agent_cli,
+            agent_cli=worker_agent_cli,
             on_output=self.on_agent_output,
         )
         # If provided worker, update its agent_cli
         if self._provided_worker:
-            self._provided_worker.agent_cli = self._shared_agent_cli
+            self._provided_worker.agent_cli = worker_agent_cli
+
+        # Store worker's agent CLI for reference
+        self._worker_agent_cli = worker_agent_cli
 
         return chat_id
 
@@ -177,10 +200,14 @@ class TaskRunner:
         self._log_status(f"开始执行任务: {task[:100]}...")
 
         # Initialize agents with shared chat session
-        self._log_status("创建会话...")
+        if self.chat_id:
+            self._log_status(f"恢复会话: {self.chat_id}")
+        else:
+            self._log_status("创建会话...")
         try:
             chat_id = self._initialize_agents()
-            self._log_status(f"会话创建成功, chat_id: {chat_id}")
+            if not self.chat_id:
+                self._log_status(f"会话创建成功, chat_id: {chat_id}")
         except Exception as e:
             self._log_status(f"创建会话失败: {e}")
             return TaskRunResult(
@@ -207,9 +234,7 @@ class TaskRunner:
 
                 if iteration == 1:
                     # First iteration: execute the original task
-                    worker_result = self.worker.execute_task(
-                        task, on_output=self.on_agent_output
-                    )
+                    worker_result = self.worker.execute_task(task, on_output=self.on_agent_output)
                 else:
                     # Subsequent iterations: include pending items
                     worker_result = self.worker.execute_task(
@@ -339,9 +364,7 @@ class TaskRunner:
                 task, pending_items, on_output=self.on_agent_output
             )
         else:
-            worker_result = self.worker.execute_task(
-                task, on_output=self.on_agent_output
-            )
+            worker_result = self.worker.execute_task(task, on_output=self.on_agent_output)
 
         # Supervisor checks
         context = ""
