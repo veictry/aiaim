@@ -574,11 +574,80 @@ def read_iteration(file_path: Path) -> Optional[str]:
 
 def get_shell_pid() -> str:
     """
-    Get the current shell's process ID.
+    Get a stable identifier for the current shell session.
+
+    We cannot rely on os.getppid() because each command execution may have
+    a different parent process (e.g., the shell forks for each command).
+    
+    Priority order:
+    1. AGEND_SHELL_ID environment variable (explicit, most reliable)
+    2. TTY name (stable within a terminal session, most reliable automatic method)
+    3. Terminal session IDs (macOS Terminal, iTerm2, etc.)
+    4. Interactive shell PID from process tree (grandparent PID)
+    5. os.getppid() as last resort
 
     Returns:
-        String representation of the parent process ID
+        String identifier for the shell session
     """
+    # 1. Check for explicit shell ID set via environment variable
+    #    Users can add `export AGEND_SHELL_ID="$$"` to their .bashrc/.zshrc
+    shell_id = os.environ.get("AGEND_SHELL_ID")
+    if shell_id:
+        return shell_id
+    
+    # 2. Try to get the TTY name - most stable within a terminal session
+    #    Try multiple file descriptors as some may be redirected
+    tty_name = None
+    
+    # Try stdin, stdout, stderr in order
+    for fd in (0, 1, 2):
+        try:
+            tty_name = os.ttyname(fd)
+            break
+        except (OSError, AttributeError):
+            pass
+    
+    # If none of the standard FDs are TTYs, try opening /dev/tty which always
+    # refers to the controlling terminal of the current process (if one exists)
+    if not tty_name:
+        try:
+            with open("/dev/tty", "r") as f:
+                tty_name = os.ttyname(f.fileno())
+        except (OSError, IOError):
+            pass
+    
+    if tty_name:
+        return f"tty:{tty_name}"
+    
+    # 3. Check terminal-specific session IDs
+    for env_var in ("TERM_SESSION_ID", "ITERM_SESSION_ID", "KITTY_WINDOW_ID", 
+                    "WEZTERM_PANE", "ALACRITTY_WINDOW_ID", "WINDOWID"):
+        session_id = os.environ.get(env_var)
+        if session_id:
+            return f"{env_var}:{session_id}"
+    
+    # 4. Try to find the interactive shell's PID by walking up the process tree
+    #    When user runs `agend`, the process tree typically looks like:
+    #    zsh (interactive shell) -> fork -> agend (Python)
+    #    So we want the grandparent PID (the interactive shell)
+    try:
+        import subprocess
+        ppid = os.getppid()
+        # Get the parent of our parent (the interactive shell)
+        result = subprocess.run(
+            ["ps", "-p", str(ppid), "-o", "ppid="],
+            capture_output=True,
+            text=True,
+            timeout=1
+        )
+        if result.returncode == 0:
+            grandparent_pid = result.stdout.strip()
+            if grandparent_pid and grandparent_pid.isdigit():
+                return f"shell:{grandparent_pid}"
+    except Exception:
+        pass
+    
+    # 5. Fall back to ppid (may vary between commands, but better than nothing)
     return str(os.getppid())
 
 

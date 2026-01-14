@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2025-01-14
+
+### Added
+- **CLI 子命令支持**: 新增 `create-chat` 子命令，创建新会话并绑定到当前 shell
+- **Chat ID 绑定**: 新增 `--chat-id` 选项，支持绑定 Agent Chat ID 到会话
+- **Session 选项**: 新增 `--session/-s` 选项，显式指定或切换会话
+- **Session 锁定**: 支持 shell 锁定到特定 session，后续命令自动使用
+
+### Changed
+- 重构 CLI 架构，使用 `click.Group` 支持子命令
+- 改进 Shell Session 识别逻辑，使用 TTY、终端 Session ID 等更稳定的方式
+- 简化 session ID 和 chat ID 的显示（不再截断）
+- 移除未使用的 imports
+
+### Fixed
+- 修复跨命令 shell session 识别不稳定的问题
+
 ## [0.2.1] - 2025-01-14
 
 ### Fixed

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agend"
-version = "0.2.1"
+version = "0.2.2"
 description = "AI Agent Iterative Manager - Supervisor/Worker agent pattern for task completion"
 readme = "README.md"
 license = {text = "MIT"}
